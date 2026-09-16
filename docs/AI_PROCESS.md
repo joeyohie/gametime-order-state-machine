@@ -251,3 +251,21 @@ Plan is now v3. Implementation starts from here.
   exercise's core distinction), and an exit attempt from each terminal state.
   A second test proves history is appended with detail and ordered timestamps;
   a third proves a rejected transition leaves the order untouched.
+- My review of the AI draft, and what changed because of it:
+  - Renamed the `legal` map to `allowedTransitions` and reworded "legal" to
+    "allowed" throughout; same meaning, more explicit.
+  - Asked whether the engine should sit behind an interface with a guard like
+    the accessors. No: interfaces in Go are for substitution, and the engine
+    has one pure implementation with nothing to swap or mock. The accessors
+    have interfaces because the mocks stand in for real services. Also
+    confirmed `CanTransition` is not only used by `Transition` — the manager
+    calls it before any side effect so an illegal action never reaches the
+    processor or fulfillment.
+  - My linter flagged the membership loop; replaced with `slices.Contains`.
+  - Asked why `from` is saved and why `order.State = to` is needed. The first
+    is because the state is overwritten on the next line and the history
+    entry still needs the old value; the second is the transition itself,
+    the only line in the codebase where an order's state changes. Both now
+    carry short inline comments.
+  - Made the invalid-transition error read `from "x" to "y"` instead of
+    `"x" -> "y"`.
