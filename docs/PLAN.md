@@ -255,7 +255,7 @@ payment problem.
 
 | Method | Path                    | Purpose                                   |
 |--------|-------------------------|-------------------------------------------|
-| POST   | /orders                 | create order (amount_cents, event name)   |
+| POST   | /orders                 | create order (amount_cents)               |
 | POST   | /orders/:id/authorize   | attempt payment authorization             |
 | POST   | /orders/:id/complete    | attempt completion (runs recovery flow)   |
 | GET    | /orders/:id             | current state + full history (required)   |
@@ -269,6 +269,20 @@ payment is a successful API call that resulted in `payment_declined`; a
 `needs_attention` landing is a 200 whose body says so. 4xx is reserved for caller
 errors: 400 bad payload, 404 unknown order, 409 invalid transition. Anything
 unexpected is a 500. Mirrors processor-API conventions.
+
+Why `needs_attention` is a 200 and not a 5xx (README tradeoff, discussed at
+length): a 5xx tells the client "I failed to process your request, retry." But
+the request WAS processed — the order changed state and that change is saved. A
+client retrying on the 5xx would get a 409 because the order is now terminal,
+and monitoring would count a correctly handled partial failure as a server
+failure. The status code describes the request; the state describes the order.
+The client surfaces it by reading `state`, exactly as it does for
+`payment_declined`; ops is told by the Error-level log line the manager emits.
+With more time (README TL;DR): a `void_pending` state with a retry worker for
+transient processor errors before escalating to `needs_attention`; monitoring
+and alerting on that error log; immediate notification to the customer and to
+Gametime support; and, if the team prefers, an agreed distinct status code for
+the partial-failure response.
 
 Response shape (all endpoints): the order — `id`, `state`, `amount_cents`,
 `payment_id` if any, and `history: [{from, to, event, at, detail}]`, where `detail`
@@ -339,12 +353,23 @@ zap log output.
   a Stripe implementation next to the mock, etc.) once a second real
   implementation exists; at three interfaces and ~150 lines, one package with
   one file per accessor is easier to read.
-- needs_attention resolution flow (ops tooling, alerting)
+- `void_pending` state with a retry worker (backoff) for transient processor
+  errors on void, escalating to `needs_attention` only after retries fail; the
+  spec collapses this into one step, so we follow the spec
+- needs_attention resolution flow: alerting on the Error log line, immediate
+  notification to the customer and to Gametime support, ops tooling to void
+  the hold manually using the retained payment ID
 - Customer-initiated cancel endpoint (exists in real APIs; out of scope here —
   cancellation only arises as failure recovery)
 - Customer notification on cancellation / needs_attention (in real life the order
   holder must be told their order didn't go through; here the state + history is
   the record)
+- API response shape: today the handlers serialize the domain `Order` directly
+  (the spec asks for state + history, and full-object responses mirror
+  Stripe). Real life would decouple with a response type of its own, redact
+  raw processor/fulfillment error text from the client-facing `detail` (keep
+  it for ops and logs; give clients a user-safe reason code), and could return
+  a lean id + state from the action endpoints
 - AuthN/Z, rate limiting, metrics/tracing (the zap transition log is the seed
   of observability)
 

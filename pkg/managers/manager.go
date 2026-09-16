@@ -127,7 +127,8 @@ func (manager *OrderManager) Authorize(ctx context.Context, orderID string) (mod
 		// Not a decline: the processor could not answer (timeout, outage).
 		// The mock never does this; a real processor would. Error level
 		// because it is an operational problem someone should act on.
-		manager.logger.Error("authorize: processor error", zap.String("order_id", order.ID), zap.Error(err))
+		manager.logger.Error("authorize: processor error",
+			zap.String("order_id", order.ID), zap.String("payment_id", order.PaymentID), zap.Error(err))
 		return models.Order{}, fmt.Errorf("authorize order %s: %w", order.ID, err)
 	}
 
@@ -231,6 +232,7 @@ func (manager *OrderManager) logTransition(order models.Order) {
 	entry := order.History[len(order.History)-1]
 	manager.logger.Info("order transition",
 		zap.String("order_id", order.ID),
+		zap.String("payment_id", order.PaymentID),
 		zap.String("from", string(entry.From)),
 		zap.String("to", string(entry.To)),
 		zap.String("event", entry.Event),

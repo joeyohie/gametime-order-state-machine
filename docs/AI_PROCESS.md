@@ -269,3 +269,85 @@ Plan is now v3. Implementation starts from here.
     carry short inline comments.
   - Made the invalid-transition error read `from "x" to "y"` instead of
     `"x" -> "y"`.
+
+### Slice 4 — manager (2026-09-16)
+
+- AI wrote `OrderManager` from PLAN §3–§5 (one lock, `record` helper, zap
+  transition log, decline-vs-other-error branch on authorize, the
+  fulfillment → void → cancelled/needs_attention recovery) and six tests: the
+  four required scenarios plus invalid-transition and unknown-order. Tests use
+  explicit fakes with error fields and call counters, not the demo magic
+  amounts, and assert on the order fetched back from the real store.
+- Validation: `go vet` clean; `go test -race ./...` passes across all three
+  tested packages. Dependencies added: zap (logging, my choice), google/uuid
+  (order ids, my choice over a hand-rolled crypto/rand helper).
+- My review of the AI draft, and what changed because of it:
+  - Renamed the manager fields `storeAccessor` / `paymentAccessor` /
+    `fulfillmentAccessor` so call sites say which layer they hit.
+  - Confirmed how the lock works: every manager method takes the same mutex,
+    and the manager is the only holder of the accessors, so one request's
+    whole get → check → accessor call → update finishes before another's
+    starts. Asked why the mutex isn't a constructor argument: it's internal
+    state nothing else may lock; now said in the struct comment.
+  - Caught a naming collision: `Create` took an `eventName` (the ticketed
+    event) while history entries have an `Event` (the action outcome). Decided
+    the order field wasn't needed by the spec at all and dropped it; create
+    now takes only `amount_cents`.
+  - Asked "log the error too?" at every return. Answer, now in the package
+    comment: log once, at the layer that handles it (the endpoint, which picks
+    the status code). The manager logs only transitions and the two failures
+    it alone has context for. Raised the processor-error log from Warn to
+    Error since it's an operational problem.
+  - Asked where customer notification would go; added "with more time" markers
+    at the complete and cancel points rather than building it.
+  - Flagged the hand-rolled id helper as over-engineered; replaced with
+    `uuid.NewString()`.
+  - Longest discussion: should `needs_attention` return a 5xx so clients and
+    support are alerted? Walked through real reasons a void fails (processor
+    outage/timeout, hold already captured, hold expired, our own bug) and
+    separated two questions. The order's state must be `needs_attention`
+    regardless of cause (the spec says so, and leaving it authorized would
+    make it look completable). The status code stays 200 because the request
+    was processed and the state persisted; a 5xx invites a retry that would
+    409 and mis-counts a handled partial failure as a server failure. The
+    customer is told by the client reading `state`, support by the Error log.
+    README TL;DR agreed: with more time, a `void_pending` retry state for
+    processor errors, monitoring on the error log, immediate customer and
+    support notification, and an agreed distinct status code if the team
+    wants one. Captured in PLAN §6 and §8.
+
+### Slice 5 — endpoints, main, demo (2026-09-16)
+
+- AI wrote the Gin handlers (five routes, a `respond` helper mapping sentinel
+  errors to 404/409/500, a zap request-log middleware), two endpoint tests on
+  the real wiring (happy path through all four endpoints; complete-before-
+  authorize is a 409), `main.go`, and `demo.sh`.
+- Validation: `go test -race ./...` passes in all four packages. I ran the
+  server and `demo.sh` end to end and read every response: all four scenarios
+  land in the right state with the right history, the cancelled and
+  needs_attention details carry the error text, the payment id is retained on
+  needs_attention, complete on a declined order returns a 409 with a readable
+  message, and the server log shows one Error line for the needs_attention
+  case with both errors as named fields.
+- My review of the AI draft, and what changed because of it:
+  - Asked whether the two middlewares were necessary or boilerplate. Recovery
+    (panic → 500 instead of a dead server) is one word and stays; the request
+    logger stays because it uses the same structured logger as everything
+    else, which matters for the next point. Both now explained in a comment.
+  - Asked whether authorize/complete should be PATCH or PUT. No: the client
+    sends no fields and does not choose the resulting state; actions are POSTs
+    to a sub-resource (Stripe's confirm/capture/cancel). Now in a comment.
+  - Asked what `gt=0` checks. It's the validator rejecting negatives; it knows
+    nothing about cents — cents is the field's contract (whole number, never a
+    float). Now in a comment.
+  - Asked whether the `:id` path param should be format-checked. No: Gin only
+    matches a non-empty segment, and any unknown id is a 404 from the store.
+  - Asked whether every log line carries the order id, since in real life logs
+    get searched by order id and payment id. They didn't: the endpoint's two
+    lines had only the path, and the manager's transition line lacked the
+    payment id. Fixed: every order-related log line now has `order_id`, and
+    the manager's lines add `payment_id` once one exists. Verified by
+    re-running the demo and reading the server log.
+  - Asked what the `//nolint:errcheck` on `logger.Sync()` meant. It's a
+    directive for a linter this repo doesn't run; replaced with the plain Go
+    idiom `_ = logger.Sync()` and a comment on why the error is ignored.
