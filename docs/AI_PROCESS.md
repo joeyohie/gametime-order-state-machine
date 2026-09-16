@@ -201,6 +201,41 @@ Plan is now v3. Implementation starts from here.
   returned order can be mutated without changing what the store holds (the
   copy guarantee the manager lock design relies on). `gofmt -l` caught one
   misaligned const block; fixed with `gofmt -w`.
+- My file-by-file review of the AI draft, and what changed because of it:
+  - Renamed every short identifier (`s`, `o`, `id`, `m`, `e`) to explicit
+    names (`store`, `order`, `orderID`, `payment`, `engine`) across the whole
+    codebase; the manager will read `store.Get`, `payment.Authorize`,
+    `fulfillment.Fulfill`. AI flagged that my `orderId` should be `orderID`
+    (Go initialism convention); accepted.
+  - `List()` returned orders in random map order, which defeats its purpose
+    (a sanity snapshot after running the demo). Added a sort on the creation
+    entry's timestamp. Tried inlining `History[0].At`, then went back to the
+    guarded `createdAt` helper because an order with no history would panic
+    on the index and the store can't assume the manager always wrote one.
+  - Asked whether the store test should verify Create actually persisted, not
+    just returned nil. It should; added a Get-after-Create assertion.
+  - Asked whether to split accessors into subpackages (interface + impl per
+    accessor). Decided no at three interfaces / ~150 lines; recorded as a
+    with-more-time item for when a second real implementation exists.
+  - Asked why the payment mock keeps its own amount map instead of a field on
+    Order. Because `Void` only receives a payment ID, like a real processor;
+    the processor's bookkeeping stays on its side of the interface. Renamed
+    the map `openHolds` and kept `delete` on void (this is a record of what is
+    open; the order's history is the durable record).
+  - Asked why the context parameter is unused in the mocks (no I/O; a real
+    implementation would pass it to the network call) and whether the
+    "not safe for concurrent use on its own" comments are enforceable. They
+    aren't at runtime; enforcement is wiring (only the manager holds the
+    accessors) plus `go test -race`, now the standard test command. With a
+    real database the store becomes safe on its own; noted in with-more-time.
+  - Asked whether the fulfillment mock should distinguish the two failing
+    amounts. No — both fail fulfillment identically; what differs is the void
+    that follows, which is the payment mock's decision. Added a comment saying
+    so instead of splitting the case.
+  - Added compile-time interface guards (`var _ Iface = (*Impl)(nil)`) for all
+    three implementations, a pattern from my previous team.
+  - Final pass trimming comments: shortened the mock processor doc, moved the
+    void-deletion rationale inline, rewrapped two long lines.
 
 ### Slice 3 — engine (2026-09-16)
 

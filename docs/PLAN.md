@@ -331,7 +331,14 @@ zap log output.
   it's a plain 500 with the order left in `initialized`. The dangerous version is
   a timeout *after* the processor placed the hold — we don't know a hold exists.
   Real systems use an idempotency key and query the processor before retrying.
-- Real persistence (Postgres) + transactional outbox
+- Real persistence (Postgres) + transactional outbox. With a database the
+  store becomes safe for concurrent use on its own (row locks, conditional
+  updates), so the "not safe on its own; the manager serializes all calls"
+  contract on the in-memory accessors goes away.
+- Accessors split into subpackages (`accessors/payment` with the interface and
+  a Stripe implementation next to the mock, etc.) once a second real
+  implementation exists; at three interfaces and ~150 lines, one package with
+  one file per accessor is easier to read.
 - needs_attention resolution flow (ops tooling, alerting)
 - Customer-initiated cancel endpoint (exists in real APIs; out of scope here —
   cancellation only arises as failure recovery)
@@ -365,5 +372,7 @@ bugs caught).
       run (`go run .`), tradeoffs, with-more-time. Link to docs/ for depth.
 - [ ] AI_PROCESS.md kept live through implementation and testing, not just planning
 - [ ] demo.sh + magic amounts documented
-- [ ] Fresh-clone check: `git clone` → `go test ./...` → `go run .` → `demo.sh`,
-      following only the README
+- [ ] Fresh-clone check: `git clone` → `go test -race ./...` → `go run .` →
+      `demo.sh`, following only the README. `-race` is the enforcement for the
+      "not safe for concurrent use on its own" contracts: the race detector
+      fails the run if any accessor is ever touched outside the manager lock.
