@@ -1,0 +1,6 @@
+# built binary
+/gametime-order-state-machine
+.DS_Store
+
+# take-home prompt, not part of the submission
+docs/*.pdf

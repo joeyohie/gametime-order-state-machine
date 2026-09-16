@@ -108,10 +108,13 @@ be simplified, what's missing. Findings and what I did with them:
   (200); any other processor error leaves the order `initialized` and returns
   502, so authorize is retryable. It's a small amount of code and it's the kind
   of thing that matters in payments.
-- **Accepted — `needs_attention` keeps the auth ID.** I had to ask what "auth ID"
-  meant: it's the processor's identifier for the hold (Stripe's PaymentIntent
-  id), distinct from our order ID, and it's what void is called with and what
-  ops would use to void manually.
+- **Accepted — `needs_attention` keeps the processor's payment ID.** I had to
+  ask what the reviewer's "auth ID" meant: it's the processor's identifier for
+  the payment (Stripe's PaymentIntent id), distinct from our order ID, and it's
+  what void is called with and what ops would use to void manually. While
+  reviewing the models slice I renamed it `payment_id`: the processor's id
+  belongs to the payment object for its whole life (void now, capture later),
+  and "auth" only described the stage it was in when stored.
 - **Clarified, no change — `GET /orders`.** I read the spec's "querying its
   current state + history" as requiring the list endpoint; the reviewer read
   "its" as one order, satisfied by `GET /orders/:id` returning `history`. Kept
@@ -175,7 +178,11 @@ Plan is now v3. Implementation starts from here.
 - AI wrote `go.mod` (module path = the GitHub repo path so a fresh clone builds
   as-is), `.gitignore`, and `pkg/models` (types + the three sentinel errors)
   straight from PLAN §4. I reviewed the struct fields and JSON tags against the
-  response shape in PLAN §6.
+  response shape in PLAN §6, renamed `auth_id` → `payment_id` (see above), kept
+  `from` without `omitempty` so every history entry has the same shape, and
+  asked whether a failed void needs its own error — no: sentinels exist only
+  where a caller branches on them with `errors.Is`, and a failed void is a
+  business outcome (`needs_attention` + history detail), not a returned error.
 - Validation: `gofmt -l` clean, `go vet ./...` clean. No tests at this layer —
   there is no logic to test.
 

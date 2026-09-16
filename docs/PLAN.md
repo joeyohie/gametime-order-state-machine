@@ -95,17 +95,18 @@ README "with more time."
 
 ## 3. Action flows
 
-Two identifiers matter throughout. The **order ID** is ours. The **auth ID** is the
-processor's identifier for the hold (Stripe: the PaymentIntent id). Void is called
-with the auth ID because the processor doesn't know our order IDs. The order
-stores both, and an order in `needs_attention` **keeps its auth ID** so ops can
-find and void the hold in the processor dashboard.
+Two identifiers matter throughout. The **order ID** is ours. The **payment ID** is
+the processor's identifier for the payment object (Stripe: the PaymentIntent id),
+which outlives the authorization stage — the same id is used to void now or
+capture later. Void is called with it because the processor doesn't know our
+order IDs. The order stores both, and an order in `needs_attention` **keeps its
+payment ID** so ops can find and void the hold in the processor dashboard.
 
 ### Authorize — `OrderManager.Authorize(orderID)`
 
 1. Engine check: legal from current state? (must be `initialized`; else 409)
 2. Call `PaymentProcessor.Authorize`.
-3. OK → store auth ID, transition to `payment_authorized`.
+3. OK → store payment ID, transition to `payment_authorized`.
 4. `ErrPaymentDeclined` → transition to `payment_declined`; history detail
    carries the decline reason. Business outcome → 200.
 5. Any other error → returned as-is, no transition (handler default → 500).
@@ -116,7 +117,7 @@ find and void the hold in the processor dashboard.
 1. Engine check: legal from current state? (must be `payment_authorized`; else 409)
 2. Call `TicketFulfillment.Fulfill`.
 3. OK → transition to `complete`.
-4. Fails → call `PaymentProcessor.Void(authID)`:
+4. Fails → call `PaymentProcessor.Void(paymentID)`:
    - Void OK → transition to `cancelled`; history records the fulfillment error
      AND the successful void.
    - Void fails (any error — declined vs. unavailable doesn't matter here, the
@@ -161,7 +162,7 @@ pkg/accessors/            PaymentProcessor (mock), TicketFulfillment (mock),
 adds depth without adding information.
 
 - **Models** is the shared domain contract, no logic: `Order{ID, State,
-  AmountCents, AuthID, History}`, `State` (string enum), `HistoryEntry{From, To,
+  AmountCents, PaymentID, History}`, `State` (string enum), `HistoryEntry{From, To,
   Event, At, Detail}`, and the three sentinel errors.
 - **Engine is pure**: no Gin, no accessors, no I/O. Validates a move against the
   transition table and appends the history entry. Trivially unit-testable.
@@ -173,8 +174,8 @@ adds depth without adding information.
 type PaymentProcessor interface {
     // Authorize returns models.ErrPaymentDeclined on a decline; any other error
     // means the processor couldn't answer (timeout, outage).
-    Authorize(ctx context.Context, orderID string, amountCents int64) (authID string, err error)
-    Void(ctx context.Context, authID string) error
+    Authorize(ctx context.Context, orderID string, amountCents int64) (paymentID string, err error)
+    Void(ctx context.Context, paymentID string) error
 }
 
 type TicketFulfillment interface {
@@ -270,7 +271,7 @@ errors: 400 bad payload, 404 unknown order, 409 invalid transition. Anything
 unexpected is a 500. Mirrors processor-API conventions.
 
 Response shape (all endpoints): the order — `id`, `state`, `amount_cents`,
-`auth_id` if any, and `history: [{from, to, event, at, detail}]`, where `detail`
+`payment_id` if any, and `history: [{from, to, event, at, detail}]`, where `detail`
 carries error text on failures (this is where "don't swallow" is visible).
 
 Mock failure triggers, so every scenario is curl-able with no test hooks in the
@@ -300,13 +301,13 @@ asserts against the PERSISTED order (fetched back via `store.Get`), not just the
 return value — this catches "computed right, never saved" bugs. Assertions per
 scenario: final stored state, history contents, and which mock methods were called.
 1. **Happy path**: create → authorize → complete; history exactly three entries
-   [→initialized, →payment_authorized, →complete]; auth ID stored.
+   [→initialized, →payment_authorized, →complete]; payment ID stored.
 2. **Payment declined** → `payment_declined`; assert Void was NEVER called (mock
    records calls).
 3. **Fulfillment fails, void succeeds** → `cancelled`; history holds the
    fulfillment error and the void event.
 4. **Fulfillment fails, void fails** → `needs_attention`; history holds BOTH
-   errors; auth ID still present.
+   errors; payment ID still present.
 
 Endpoints (httptest + Gin): one happy-path end-to-end and one 409. Written last;
 cut if time runs short.
