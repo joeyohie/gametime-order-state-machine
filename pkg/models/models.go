@@ -33,7 +33,6 @@ type HistoryEntry struct {
 // can be voided manually.
 type Order struct {
 	ID          string         `json:"id"`
-	EventName   string         `json:"event_name"`
 	AmountCents int64          `json:"amount_cents"`
 	State       State          `json:"state"`
 	PaymentID   string         `json:"payment_id,omitempty"`
