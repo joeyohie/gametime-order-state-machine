@@ -113,3 +113,7 @@ current state.
 
 The full design, including every decision and its alternatives, is in
 [docs/PLAN.md](docs/PLAN.md).
+
+---
+
+© 2026 Jo Whang. Shared for Gametime's hiring evaluation; no license granted for reuse.
