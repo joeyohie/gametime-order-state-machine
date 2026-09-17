@@ -14,10 +14,13 @@ import (
 	"github.com/joeyohie/gametime-order-state-machine/pkg/models"
 )
 
-// The fakes below are configured explicitly per scenario and record their
-// calls, so each test states exactly what fails and can assert what was (and
-// was not) called. They do not use the demo magic amounts.
-
+// These tests run the real manager, the real engine, and the real in-memory
+// store. Only the two outside services are faked. The fakes are configured
+// explicitly per scenario and record their calls, so each test states exactly
+// what fails and can assert what was (and was not) called, which the demo
+// mocks cannot do. Hand-written rather than generated (mockgen and the like):
+// two interfaces with three methods is thirty readable lines, and a code
+// generation step would cost more than it saves at this size.
 type fakePayment struct {
 	authorizeErr    error
 	voidErr         error
@@ -68,8 +71,13 @@ func events(order models.Order) []string {
 	return names
 }
 
+// assertEvents checks the history is exactly the given sequence: same length,
+// same events, same order.
 func assertEvents(t *testing.T, order models.Order, want ...string) {
 	t.Helper()
+	if len(order.History) != len(want) {
+		t.Fatalf("history: want %d entries, got %d: %v", len(want), len(order.History), events(order))
+	}
 	got := events(order)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("history events: want %v, got %v", want, got)

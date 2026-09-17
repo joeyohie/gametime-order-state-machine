@@ -31,6 +31,9 @@ func newTestRouter() *gin.Engine {
 }
 
 // do sends one request and decodes the JSON body into out (if non-nil).
+// No server is started: Gin's router is an http.Handler, so each test builds a
+// request in memory and calls router.ServeHTTP with a recorder that captures
+// the status and body. Same code path as a real request, minus the network.
 func do(t *testing.T, router *gin.Engine, method, path string, body any, out any) int {
 	t.Helper()
 	var payload bytes.Buffer
